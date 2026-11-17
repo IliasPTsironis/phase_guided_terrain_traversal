@@ -232,6 +232,18 @@ def ablation_contact_only_config() -> config_dict.ConfigDict:
     return cfg
 
 
+def level_config() -> config_dict.ConfigDict:
+    """PGTT + horizontal back: per-leg stance targets and a level-body reward."""
+    cfg = default_config()
+    cfg.level_body = True
+    cfg.reward_config.scales.level = 1.0
+    cfg.reward_config.scales.ang_vel_xy = -0.1
+    cfg.reward_config.level_sigma = 0.05        # ~6 deg tilt -> reward 0.37
+    cfg.reward_config.max_stance_offset = 0.10  # m, limit of leg-length difference
+    cfg.reward_config.max_swing_z = -0.10       # m, highest allowed swing target
+    return cfg
+
+
 def wild_config() -> config_dict.ConfigDict:
     return config_dict.create(
         ctrl_dt=0.02,

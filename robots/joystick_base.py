@@ -13,6 +13,7 @@ from mujoco_playground._src import mjx_env
 import robots.base as robot_base
 import robots.gait as gait
 from robots.heightmap import create_sensor_matrix as _create_sensor_matrix
+from robots.heightmap import raycast_sensor as _raycast_sensor
 
 
 class Joystick_Base(robot_base.RobotEnv):
@@ -129,6 +130,7 @@ class Joystick_Base(robot_base.RobotEnv):
         "H_max":0.1*jp.ones(4),
         "heightscan":heightscan,
         "H_min":0.*jp.ones(4),
+        "stance_offset":jp.zeros(4),
         "motor_targets":0.*jp.ones(12),
         "qpos_error_history": qpos_error_history,
         "qvel_history": qvel_history,
@@ -146,6 +148,7 @@ class Joystick_Base(robot_base.RobotEnv):
     for k in self._config.reward_config.scales.keys():
       metrics[f"reward/{k}"] = jp.zeros(())
     metrics["swing_peak"] = jp.zeros(())
+    metrics["tilt_deg"] = jp.zeros(())
 
     obs = self._get_obs(data, info)
     reward, done = jp.zeros(2)
@@ -194,6 +197,7 @@ class Joystick_Base(robot_base.RobotEnv):
     state.info["heightscan"]=heightscan
     state.info["H_max"]=H_max_value-H_min_value
     state.info["H_min"]=H_min_value
+    state.info["stance_offset"]=self._stance_offset(data)
 
     obs = self._get_obs(data, state.info)
 
@@ -203,7 +207,9 @@ class Joystick_Base(robot_base.RobotEnv):
         data, action, state.info, state.metrics, done, first_contact, contact
     )
     rewards = {
-        k: v * self._config.reward_config.scales[k] for k, v in rewards.items()
+        k: v * self._config.reward_config.scales[k]
+        for k, v in rewards.items()
+        if k in self._config.reward_config.scales
     }
     reward = jp.clip(sum(rewards.values()) * self.dt, 0.0, 10000.0)
 
@@ -230,6 +236,7 @@ class Joystick_Base(robot_base.RobotEnv):
     for k, v in rewards.items():
       state.metrics[f"reward/{k}"] = v
     state.metrics["swing_peak"] = jp.mean(state.info["swing_peak"])
+    state.metrics["tilt_deg"] = self._tilt_deg(data)
 
     done = done.astype(reward.dtype)
     state = state.replace(data=data, obs=obs, reward=reward, done=done)
@@ -380,8 +387,9 @@ class Joystick_Base(robot_base.RobotEnv):
         "feet_clearance": self._cost_feet_clearance(data,info["H_max"]),
 
         "feet_phase":self._reward_feet_phase(
-            data, info["phase"],info["H_max"]+self._config.reward_config.swing_height,self._config.reward_config.base_feet_distance
+            data, info["phase"],self._swing_target(info),self._stance_target(info)
         ),
+        "level":self._reward_level(self.get_upvector(data)),
         "body_height":self._reward_body_height(
             data,info
         ),
@@ -396,6 +404,53 @@ class Joystick_Base(robot_base.RobotEnv):
         "center":self._reward_center(data,self.init_feet_pos),
         "feet_height":self._cost_feet_height(info["swing_peak"], first_contact, info)
     }
+  # ---- Level-back extension (horizontal body for drone landing) ----
+
+  def _level_body(self) -> bool:
+    return bool(self._config.get("level_body", False))
+
+  def _stance_offset(self, data: mjx.Data) -> jax.Array:
+    """Per-leg stance offset (m): ground height under each foot minus the mean.
+
+    Positive for a foot standing on higher ground. With a horizontal body that
+    foot must be closer to the body, so its stance target is raised by this
+    amount. Returns zeros when level_body is off (original PGTT behaviour).
+    """
+    if not self._level_body():
+      return jp.zeros(4)
+    feet_xy = data.site_xpos[self._feet_site_id][:, :2]
+    ray_z = jp.full((4, 1), data.qpos[2] + 0.6)
+    origins = jp.concatenate([feet_xy, ray_z], axis=-1)
+    hits = jax.vmap(_raycast_sensor, in_axes=(None, None, 0))(
+        self.mjx_model, data, origins
+    )
+    ground = hits[:, 2]
+    offset = ground - jp.mean(ground)
+    lim = self._config.reward_config.max_stance_offset
+    return jp.clip(offset, -lim, lim)
+
+  def _stance_target(self, info: dict[str, Any]) -> jax.Array:
+    # Desired foot z in the body frame during stance, one value per leg.
+    return self._config.reward_config.base_feet_distance + info["stance_offset"]
+
+  def _swing_target(self, info: dict[str, Any]) -> jax.Array:
+    # Desired foot z in the body frame at the top of the swing, per leg.
+    cfg = self._config.reward_config
+    lift = cfg.swing_height - cfg.base_feet_distance  # 0.1 m for the Go2
+    peak = self._stance_target(info) + lift + info["H_max"]
+    if self._level_body():
+      peak = jp.minimum(peak, cfg.max_swing_z)
+    return peak
+
+  def _reward_level(self, torso_zaxis: jax.Array) -> jax.Array:
+    # 1 when the back is horizontal, decays with sin^2(tilt).
+    tilt_sq = jp.sum(jp.square(torso_zaxis[:2]))
+    return jp.exp(-tilt_sq / self._config.reward_config.get("level_sigma", 0.01))
+
+  def _tilt_deg(self, data: mjx.Data) -> jax.Array:
+    up_z = jp.clip(self.get_upvector(data)[-1], -1.0, 1.0)
+    return jp.rad2deg(jp.arccos(up_z))
+
   def _reward_center(self,data,init):
     feet_pos=self.get_feet_pos(data)
     weight=jp.array([1.,1.,0.])

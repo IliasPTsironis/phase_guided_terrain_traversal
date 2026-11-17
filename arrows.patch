@@ -1,0 +1,20 @@
+diff --git a/deploy/deploy_heightmap.py b/deploy/deploy_heightmap.py
+index 3f24d03..6aa161a 100644
+--- a/deploy/deploy_heightmap.py
++++ b/deploy/deploy_heightmap.py
+@@ -349,6 +349,15 @@ def key_callback(keycode):
+         paused = not paused
+     if chr(keycode) == 'O':
+         print(select)
++    # Arrow-key driving: up/down = forward speed, left/right = turning, X = stop.
++    if keycode == 265: control.command[0] += 0.1
++    if keycode == 264: control.command[0] -= 0.1
++    if keycode == 263: control.command[2] += 0.2
++    if keycode == 262: control.command[2] -= 0.2
++    if keycode == ord('X'): control.command[:] = 0.0
++    control.command[:] = np.clip(control.command, -1.0, 1.0)
++    if keycode in (262, 263, 264, 265, ord('X')):
++        print("command [vx, vy, yaw]:", np.round(control.command, 2))
+ 
+ 
+ if render:

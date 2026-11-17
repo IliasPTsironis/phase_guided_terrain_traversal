@@ -349,6 +349,15 @@ def key_callback(keycode):
         paused = not paused
     if chr(keycode) == 'O':
         print(select)
+    # Arrow-key driving: up/down = forward speed, left/right = turning, X = stop.
+    if keycode == 265: control.command[0] += 0.1
+    if keycode == 264: control.command[0] -= 0.1
+    if keycode == 263: control.command[2] += 0.2
+    if keycode == 262: control.command[2] -= 0.2
+    if keycode == ord('X'): control.command[:] = 0.0
+    control.command[:] = np.clip(control.command, -1.0, 1.0)
+    if keycode in (262, 263, 264, 265, ord('X')):
+        print("command [vx, vy, yaw]:", np.round(control.command, 2))
 
 
 if render:
@@ -365,6 +374,7 @@ start_time = time.time()
 trajectory=[]
 joint_angle_log = []
 time_log = []
+tilt_log = []
 while data.time <total_time:#config_dict.episode_length*sim_dt:
     if pert_enable:
         maybe_apply_perturbation()
@@ -381,6 +391,7 @@ while data.time <total_time:#config_dict.episode_length*sim_dt:
     if not paused:
         joint_angle_log.append(data.qpos[7:10].copy())
         time_log.append(data.time)
+        tilt_log.append(np.degrees(np.arccos(np.clip(imu_xmat[2, 2], -1, 1))))
         # print(data.time)
         mujoco.mj_step(model, data)
         # heightscan[...,2]=z_normal.reshape((9,9))
@@ -419,6 +430,8 @@ while data.time <total_time:#config_dict.episode_length*sim_dt:
             
             viewer.sync()
     time.sleep(0.002)
+
+print("mean tilt (deg):", np.mean(tilt_log), " max tilt (deg):", np.max(tilt_log))
 
 joint_angle_log = np.array(joint_angle_log)
 time_log = np.array(time_log)

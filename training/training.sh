@@ -3,7 +3,7 @@
 ROBOT="${1:-go2}"
 STEPS=200_000_000
 IFS=', ' read -ra RUNS <<< "${RUNS:-0}"
-METHODS=("pgtt" "baseline" "wild")
+METHODS=("level")
 LEVELS=("level03" "level07" "level10" "level13")
 
 echo "Training robot: $ROBOT"

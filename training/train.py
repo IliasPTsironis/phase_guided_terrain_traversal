@@ -116,6 +116,8 @@ def progress_training(num_steps, metrics,env_cfg):
   angvels.append(ang_tracking_per)
   print("Lin vel",vel_tracking_per,)
   print("ang vel",ang_tracking_per)
+  if "eval/episode_tilt_deg" in metrics:
+    print("mean tilt (deg)",metrics["eval/episode_tilt_deg"]/average_steps)
 
   # termination critiria
   if len(y_data)>=2:
@@ -134,7 +136,7 @@ def run_training(args,progress_fn):
 
   env_name = robot_cfg.ROBOT_NAME
 
-  if args.method in ("pgtt", "ablation_phase", "ablation_contact"):
+  if args.method in ("pgtt", "level", "ablation_phase", "ablation_contact"):
     from robots.joystick_pgtt import Joystick
   elif args.method=="baseline":
     from robots.joystick import Joystick
@@ -147,6 +149,8 @@ def run_training(args,progress_fn):
   env_cfg = registry.get_default_config(env_name)
   if args.method=="pgtt":
     env_cfg=robot_cfg.default_config()
+  elif args.method=="level":
+    env_cfg=robot_cfg.level_config()
   elif args.method=="baseline":
     env_cfg=robot_cfg.baseline_config()
   elif args.method=="wild":
